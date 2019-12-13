@@ -1,0 +1,438 @@
+I"މ<h1 id="1简介">1.简介</h1>
+<p>MySQL Replication (MySQL 主从复制) 是指数据可以从一个MySQL数据库服务器主节点复制到一个或多个从节点。MySQL 默认采用异步复制方式（一级主从大概50~100 us），这样从节点不用一直访问主服务器来更新自己的数据，数据的更新可以在远程连接上进行，从节点可以复制主数据库中的所有数据库或者特定的数据库，或者特定的表。</p>
+
+<h1 id="2为什么要做主从复制">2.为什么要做主从复制</h1>
+
+<ul>
+  <li><strong>读写分离</strong> 在业务复杂的系统中，如果在生产环境中，有一句sql语句需要锁表，导致暂时不能使用读的服务，那么就很影响运行中的业务，使用主从复制，让主库负责写，从库负责读，这样，即使主库出现了锁表的情景，通过读从库也可以保证业务的正常运作。</li>
+  <li><strong>做数据的热备</strong></li>
+  <li><strong>架构的扩展</strong> 业务量越来越大，I/O访问频率过高，单机无法满足，此时做多库的存储，降低磁盘I/O访问的频率，提高单个机器的I/O性能。</li>
+</ul>
+
+<h1 id="3原理">3.原理</h1>
+<p>MySQL主从复制涉及到三个线程，一个运行在主节点（log dump thread），其余两个(I/O thread, SQL thread)运行在从节点
+<img src="https://imgconvert.csdnimg.cn/aHR0cHM6Ly9zczEuYmFpZHUuY29tLzZPTlhzamlwMFFJWjh0eWhucS9pdC91PTM2MTYxOTA2ODMsMzYwODgwMDc5NiZmbT0xNzMmYXBwPTQ5JmY9SlBFRw?x-oss-process=image/format,png#pic_center" alt="Alt" /></p>
+
+<h2 id="--主节点-binary-log-dump-线程">- 主节点 binary log dump 线程</h2>
+<p>当从节点连接主节点时，主节点会创建一个log dump 线程，用于发送bin-log的内容。在读取bin-log中的操作时，此线程会对主节点上的bin-log加锁，当读取完成，甚至在发动给从节点之前，锁会被释放。</p>
+
+<h2 id="--从节点-io-线程">- 从节点 I/O 线程</h2>
+<p>当从节点上执行<code class="highlighter-rouge">start slave</code>命令之后，从节点会创建一个I/O线程用来连接主节点，请求主库中更新的bin-log。I/O线程接收到主节点binlog dump 进程发来的更新之后，保存在本地relay-log中。</p>
+
+<h2 id="-从节点-sql-线程">-从节点 SQL 线程</h2>
+<p>SQL线程负责读取relay log中的内容，解析成具体的操作并执行，最终保证主从数据的一致性。</p>
+
+<p>对于每一个主从连接，都需要三个进程来完成。当主节点有多个从节点时，主节点会为每一个当前连接的从节点建一个binary log dump 进程，而每个从节点都有自己的I/O进程，SQL进程。从节点用两个线程将从主库拉取更新和执行分成独立的任务，这样在执行同步数据任务的时候，不会降低读操作的性能。比如，如果从节点没有运行，此时I/O进程可以很快从主节点获取更新，尽管SQL进程还没有执行。如果在SQL进程执行之前从节点服务停止，至少I/O进程已经从主节点拉取到了最新的变更并且保存在本地relay日志中，当服务再次起来之后，就可以完成数据的同步。</p>
+
+<p>要实施复制，首先必须打开Master 端的binary log（bin-log）功能，否则无法实现。</p>
+
+<p>因为整个复制过程实际上就是Slave 从Master 端获取该日志然后再在自己身上完全顺序的执行日志中所记录的各种操作。如下图所示：
+<img src="https://imgconvert.csdnimg.cn/aHR0cHM6Ly9zczEuYmFpZHUuY29tLzZPTlhzamlwMFFJWjh0eWhucS9pdC91PTY4Mjg5NTAyMywzODI4NzIxNjE1JmZtPTE3MyZhcHA9NDkmZj1KUEVH?x-oss-process=image/format,png#pic_center" alt="Alt" /></p>
+<h3 id="复制的基本过程如下">复制的基本过程如下：</h3>
+<p>从节点上的I/O 进程连接主节点，并请求从指定日志文件的指定位置（或者从最开始的日志）之后的日志内容；主节点接收到来自从节点的I/O请求后，通过负责复制的I/O进程根据请求信息读取指定日志指定位置之后的日志信息，返回给从节点。返回信息中除了日志所包含的信息之外，还包括本次返回的信息的bin-log file 的以及bin-log position；从节点的I/O进程接收到内容后，将接收到的日志内容更新到本机的relay log中，并将读取到的binary log文件名和位置保存到master-info 文件中，以便在下一次读取的时候能够清楚的告诉Master“我需要从某个bin-log 的哪个位置开始往后的日志内容，请发给我”；Slave 的 SQL线程检测到relay-log 中新增加了内容后，会将relay-log的内容解析成在祝节点上实际执行过的操作，并在本数据库中执行。</p>
+
+<h1 id="4实战">4.实战</h1>
+
+<h2 id="41-环境配置">4.1 环境配置：</h2>
+<ul>
+  <li>两台服务器，并在服务器上安装MySQL</li>
+  <li>或者装两台Linux系统的虚拟机，Ubuntu或者centos可随意。</li>
+  <li>再或者一台机器跑两个MySQL的实例，跑在两个不同的端口（如3306和3307）上。</li>
+  <li>MySQL版本号最好一致</li>
+  <li>建议关闭防火墙</li>
+  <li>注意以下配置的代码，主从要对应</li>
+</ul>
+
+<h2 id="42-修改配置">4.2 修改配置</h2>
+<p>下面为两台ubuntu服务器，并且均安装MySQL5.7</p>
+<h3 id="--配置主服务器">- 配置主服务器</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>vim /etc/mysql/my.cnf
+</code></pre></div></div>
+
+<p>修改配置文件</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="o">[</span>mysqld]
+server-id<span class="o">=</span>1 
+<span class="c">#配置唯一的server-id，不设置MySQL5.7以上会报错</span>
+<span class="nv">log_bin</span><span class="o">=</span>master-bin 
+<span class="c">#mysql会根据这个配置自动设置log_bin为on状态，即开启binlog</span>
+<span class="nv">log_bin_index</span><span class="o">=</span>master-bin.index
+<span class="c">#置log_bin_index文件为你指定的文件名后跟.index获得master二进制文件名及位置</span>
+
+<span class="c">#默认情况下备份是主库的全部操作都会备份到从库，实际可能需要忽略某些库，可以在主库中增加如下配置：</span>
+
+<span class="c"># 不同步哪些数据库</span>
+
+binlog-ignore-db<span class="o">=</span>mysql
+
+<span class="c"># 只同步哪些数据库，除此之外，其他不同步</span>
+
+binlog-do-db<span class="o">=</span>mysql
+</code></pre></div></div>
+<p>进入数据库，创建用于数据同步的账户（目的，让从服务器来复制数据）</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql&gt; create user repl<span class="p">;</span>
+mysql&gt; GRANT REPLICATION SLAVE ON <span class="k">*</span>.<span class="k">*</span> TO <span class="s1">'repl'</span>@<span class="s1">'从xxx.xxx.xxx.xx'</span> IDENTIFIED BY <span class="s1">'mysql'</span><span class="p">;</span>
+mysql&gt; flush privileges<span class="p">;</span>
+这个配置的含义就是创建了一个数据库用户repl，密码是mysql, 在从服务器使用repl这个账号和主服务器连接的时候，就赋予其REPLICATION SLAVE的权限， <span class="k">*</span>.<span class="k">*</span> 表面这个权限是针对主库的所有表的，其中xxx就是从服务器的ip地址。
+</code></pre></div></div>
+<p>重启数据库</p>
+<pre><code class="language-bashe">service mysql restart
+</code></pre>
+<p>启动成功之后，查看我们的配置是否起作用
+<img src="https://img-blog.csdnimg.cn/20191128170718564.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L21xYzkyNTkwMDE4MQ==,size_16,color_FFFFFF,t_70#pic_center" alt="在这里插入图片描述" />
+查看主库状态</p>
+
+<p><img src="https://img-blog.csdnimg.cn/2019112816443194.png#pic_center" alt="在这里插入图片描述" />
+此时，主数据库设置完毕</p>
+
+<p>### - 配置从服务器</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>vim /etc/mysql/my.cnf
+</code></pre></div></div>
+<p>修改配置文件</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="o">[</span>mysqld]
+server-id<span class="o">=</span>2
+<span class="c">#配置唯一的server-id，不设置MySQL5.7以上会报错，不能与主库相同</span>
+relay-log<span class="o">=</span>slave-relay-bin
+<span class="c">#定义relay_log的位置和名称</span>
+relay-log-index<span class="o">=</span>slave-relay-bin.index
+<span class="c">#同bin-log-index</span>
+</code></pre></div></div>
+<p>重启数据库</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>service mysql restart
+</code></pre></div></div>
+<p>进入数据库，执行以下代码</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql&gt; change master to <span class="nv">master_host</span><span class="o">=</span><span class="s1">'主xxx.xxx.xxx.xx'</span>,master_port<span class="o">=</span>3306,master_user<span class="o">=</span><span class="s1">'repl'</span>,master_password<span class="o">=</span><span class="s1">'mysql'</span>,master_log_file<span class="o">=</span><span class="s1">'master-bin.000005'</span>,master_log_pos<span class="o">=</span>0<span class="p">;</span>
+</code></pre></div></div>
+<p>这里面的xxx是主服务器ip，同时配置端口，repl代表访问主数据库的用户上述步骤执行完毕后执行start slave启动配置：</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql&gt; start slave<span class="p">;</span>
+<span class="c">#关闭同步为stop slave</span>
+</code></pre></div></div>
+<p>查看状态命令,\G表示换行查看</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mysql&gt; show slave status <span class="se">\G</span><span class="p">;</span> 
+</code></pre></div></div>
+<p><img src="https://img-blog.csdnimg.cn/20191128165839683.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L21xYzkyNTkwMDE4MQ==,size_16,color_FFFFFF,t_70#pic_center" alt="在这里插入图片描述" />
+当圆圈中的状态显示为yes时，代表配置成功</p>
+
+<h1 id="5从代码层面实现读写分离">5.从代码层面实现读写分离</h1>
+<p> 代码环境是 Springboot+Mybatis+阿里druib 连接池。想要读写分离就需要配置多个数据源，在进行写操作是选择写的数据源（主库），读操作时选择读的数据源（从库）。</p>
+
+<h2 id="配置文件如下applicationyml">配置文件如下（application.yml）</h2>
+<div class="language-yml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">spring</span><span class="pi">:</span>
+  <span class="na">datasource</span><span class="pi">:</span>
+    <span class="c1">#主配置源</span>
+    <span class="na">master</span><span class="pi">:</span>
+      <span class="na">name</span><span class="pi">:</span> <span class="s">test</span>
+      <span class="na">jdbc-url</span><span class="pi">:</span> <span class="s">jdbc:mysql://192.168.0.1:3306/test?allowMultiQueries=true&amp;useSSL=false&amp;useUnicode=true&amp;characterEncoding=utf-8</span>
+      <span class="na">username</span><span class="pi">:</span> <span class="s">root</span>
+      <span class="na">password</span><span class="pi">:</span> <span class="m">123456</span>
+      <span class="na">driver-class-name</span><span class="pi">:</span> <span class="s">com.mysql.jdbc.Driver</span>
+    <span class="c1">#从配置源</span>
+    <span class="na">slave</span><span class="pi">:</span>
+      <span class="na">name</span><span class="pi">:</span> <span class="s">test</span>
+      <span class="na">jdbc-url</span><span class="pi">:</span> <span class="s">jdbc:mysql://192.168.0.2:3306/test?allowMultiQueries=true&amp;useSSL=false&amp;useUnicode=true&amp;characterEncoding=utf-8</span>
+      <span class="na">username</span><span class="pi">:</span> <span class="s">root</span>
+      <span class="na">password</span><span class="pi">:</span> <span class="m">123456</span>
+      <span class="na">driver-class-name</span><span class="pi">:</span> <span class="s">com.mysql.jdbc.Driver</span>
+
+</code></pre></div></div>
+<p><strong>Enum类，定义主库从库</strong></p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="n">com</span><span class="o">.</span><span class="na">softlab</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">model</span><span class="o">;</span>
+
+<span class="cm">/**
+
+- @author : Ar1es
+
+- @date : 2019/11/28
+
+- @since : Java 8
+  */</span>
+  <span class="kd">public</span> <span class="kd">enum</span> <span class="nc">DBTypeEnum</span> <span class="o">{</span>
+
+  <span class="no">MASTER</span><span class="o">,</span> <span class="no">SLAVE</span><span class="o">;</span>
+  <span class="o">}</span>
+</code></pre></div></div>
+<p>ThreadLocal定义数据源切换</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  <span class="kn">package</span> <span class="n">com</span><span class="o">.</span><span class="na">softlab</span><span class="o">.</span><span class="na">provider</span><span class="o">.</span><span class="na">config</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">com.softlab.common.model.DBTypeEnum</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">java.util.concurrent.atomic.AtomicInteger</span><span class="o">;</span>
+
+<span class="cm">/**
+
+- @author : Ar1es
+
+- @date : 2019/11/28
+
+- @since : Java 8
+  */</span>
+  <span class="kd">public</span> <span class="kd">class</span> <span class="nc">DBContextHolder</span> <span class="o">{</span>
+
+  <span class="cm">/**
+
+  - ThreadLocal 不是 Thread，是一个线程内部的数据存储类，通过它可以在指定的线程中存储数据，对数据存储后，只有在线程中才可以获取到存储的数据，对于其他线程来说是无法获取到数据。
+  - 大致意思就是ThreadLocal提供了线程内存储变量的能力，这些变量不同之处在于每一个线程读取的变量是对应的互相独立的。通过get和set方法就可以得到当前线程对应的值。
+    */</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">ThreadLocal</span><span class="o">&lt;</span><span class="nc">DBTypeEnum</span><span class="o">&gt;</span> <span class="n">contextHolder</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ThreadLocal</span><span class="o">&lt;&gt;();</span>
+
+  <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">set</span><span class="o">(</span><span class="nc">DBTypeEnum</span> <span class="n">dbTypeEnum</span><span class="o">){</span>
+      <span class="n">contextHolder</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">dbTypeEnum</span><span class="o">);</span>
+  <span class="o">}</span>
+
+  <span class="kd">public</span> <span class="kd">static</span> <span class="nc">DBTypeEnum</span> <span class="nf">get</span><span class="o">()</span> <span class="o">{</span>
+      <span class="k">return</span> <span class="n">contextHolder</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+  <span class="o">}</span>
+
+  <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">master</span><span class="o">()</span> <span class="o">{</span>
+      <span class="n">set</span><span class="o">(</span><span class="nc">DBTypeEnum</span><span class="o">.</span><span class="na">MASTER</span><span class="o">);</span>
+      <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"--------以下操作为master（写操作）--------"</span><span class="o">);</span>
+  <span class="o">}</span>
+
+  <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">slave</span><span class="o">()</span> <span class="o">{</span>
+      <span class="n">set</span><span class="o">(</span><span class="nc">DBTypeEnum</span><span class="o">.</span><span class="na">SLAVE</span><span class="o">);</span>
+      <span class="nc">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="s">"--------以下操作为slave（读操作）--------"</span><span class="o">);</span>
+  <span class="o">}</span>
+
+  <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">clear</span><span class="o">()</span> <span class="o">{</span>
+      <span class="n">contextHolder</span><span class="o">.</span><span class="na">remove</span><span class="o">();</span>
+  <span class="o">}</span>
+  <span class="o">}</span>
+</code></pre></div></div>
+<p>重写路由选择类</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  <span class="kn">package</span> <span class="n">com</span><span class="o">.</span><span class="na">softlab</span><span class="o">.</span><span class="na">provider</span><span class="o">.</span><span class="na">config</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.lang.Nullable</span><span class="o">;</span>
+
+<span class="cm">/**
+
+- AbstractRoutingDataSource的getConnection() 方法根据查找 lookup key 键对不同目标数据源的调 用，通常是通过(但不一定)某些线程绑定的事物上下文来实现。
+
+- AbstractRoutingDataSource的多数据源动态切换的核心逻辑是：在程序运行时，把数据源数据源通过 AbstractRoutingDataSource 动态织入到程序中，灵活的进行数据源切换。
+
+- 基于AbstractRoutingDataSource的多数据源动态切换，可以实现读写分离，这么做缺点也很明显，无法动态的增加数据源。
+
+- @author : Ar1es
+
+- @date : 2019/11/28
+
+- @since : Java 8
+  */</span>
+  <span class="kd">public</span> <span class="kd">class</span> <span class="nc">MyRoutingDataSource</span> <span class="kd">extends</span> <span class="nc">AbstractRoutingDataSource</span> <span class="o">{</span>
+
+  <span class="cm">/**
+
+  - determineCurrentLookupKey() 方法决定使用哪个数据源、
+  - 根据Key获取数据源的信息，上层抽象函数的钩子
+    */</span>
+    <span class="nd">@Nullable</span>
+    <span class="nd">@Override</span>
+    <span class="kd">protected</span> <span class="nc">Object</span> <span class="nf">determineCurrentLookupKey</span><span class="o">()</span> <span class="o">{</span>
+    <span class="k">return</span> <span class="nc">DBContextHolder</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+    <span class="o">}</span>
+    <span class="o">}</span>
+</code></pre></div></div>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>配置Mybatis SqlSessionFactory 和事务管理器
+</code></pre></div></div>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="kn">package</span> <span class="n">com</span><span class="o">.</span><span class="na">softlab</span><span class="o">.</span><span class="na">provider</span><span class="o">.</span><span class="na">config</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">org.apache.ibatis.session.SqlSessionFactory</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.mybatis.spring.SqlSessionFactoryBean</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.beans.factory.annotation.Value</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.boot.context.properties.ConfigurationProperties</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.context.annotation.Bean</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.context.annotation.Configuration</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.core.io.support.PathMatchingResourcePatternResolver</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.core.io.support.ResourcePatternResolver</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.jdbc.datasource.DataSourceTransactionManager</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.transaction.PlatformTransactionManager</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.transaction.annotation.EnableTransactionManagement</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">javax.annotation.Resource</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">javax.sql.DataSource</span><span class="o">;</span>
+
+<span class="cm">/**
+
+- @author : Ar1es
+
+- @date : 2019/11/28
+
+- @since : Java 8
+  */</span>
+  <span class="nd">@Configuration</span>
+  <span class="nd">@EnableTransactionManagement</span>
+  <span class="kd">public</span> <span class="kd">class</span> <span class="nc">MyBatisConfig</span> <span class="o">{</span>
+
+  <span class="nd">@Value</span><span class="o">(</span><span class="s">"${mybatis.mapper-locations}"</span><span class="o">)</span>
+  <span class="kd">private</span> <span class="nc">String</span> <span class="n">mapperLocation</span><span class="o">;</span>
+
+<span class="cm">/**
+ * 注入自己重写的数据源
+ */</span>
+<span class="nd">@Resource</span><span class="o">(</span><span class="n">name</span> <span class="o">=</span> <span class="s">"myRoutingDataSource"</span><span class="o">)</span>
+<span class="kd">private</span> <span class="nc">DataSource</span> <span class="n">myRoutingDataSource</span><span class="o">;</span>
+
+
+<span class="cm">/**
+ * 配置SqlSessionFactory
+ * @return SqlSessionFactory
+ * @throws Exception
+ */</span>
+<span class="nd">@Bean</span>
+<span class="kd">public</span> <span class="nc">SqlSessionFactory</span> <span class="nf">sqlSessionFactory</span><span class="o">()</span> <span class="kd">throws</span> <span class="nc">Exception</span> <span class="o">{</span>
+    <span class="nc">SqlSessionFactoryBean</span> <span class="n">sqlSessionFactoryBean</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">SqlSessionFactoryBean</span><span class="o">();</span>
+    <span class="n">sqlSessionFactoryBean</span><span class="o">.</span><span class="na">setDataSource</span><span class="o">(</span><span class="n">myRoutingDataSource</span><span class="o">);</span>
+
+    <span class="c1">//ResourcePatternResolver(资源查找器)定义了getResources来查找资源</span>
+    <span class="c1">//PathMatchingResourcePatternResolver提供了以classpath开头的通配符方式查询,否则会调用ResourceLoader的getResource方法来查找</span>
+    <span class="nc">ResourcePatternResolver</span> <span class="n">resolver</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">PathMatchingResourcePatternResolver</span><span class="o">();</span>
+    <span class="n">sqlSessionFactoryBean</span><span class="o">.</span><span class="na">setMapperLocations</span><span class="o">(</span><span class="n">resolver</span><span class="o">.</span><span class="na">getResources</span><span class="o">(</span><span class="n">mapperLocation</span><span class="o">));</span>
+
+    <span class="k">return</span> <span class="n">sqlSessionFactoryBean</span><span class="o">.</span><span class="na">getObject</span><span class="o">();</span>
+<span class="o">}</span>
+<span class="cm">/**
+ * 事务管理器
+ * 不写则事务不生效
+ */</span>
+<span class="nd">@Bean</span>
+<span class="kd">public</span> <span class="nc">PlatformTransactionManager</span> <span class="nf">platformTransactionManager</span><span class="o">()</span> <span class="o">{</span>
+    <span class="k">return</span> <span class="k">new</span> <span class="nf">DataSourceTransactionManager</span><span class="o">(</span><span class="n">myRoutingDataSource</span><span class="o">);</span>
+<span class="o">}</span>
+
+<span class="o">}</span>
+</code></pre></div></div>
+<p>配置数据源</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="n">com</span><span class="o">.</span><span class="na">softlab</span><span class="o">.</span><span class="na">provider</span><span class="o">.</span><span class="na">config</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">com.softlab.common.model.DBTypeEnum</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.beans.factory.annotation.Qualifier</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.boot.context.properties.ConfigurationProperties</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.boot.jdbc.DataSourceBuilder</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.context.annotation.Bean</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.context.annotation.Configuration</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">javax.sql.DataSource</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.util.HashMap</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.util.Map</span><span class="o">;</span>
+
+<span class="cm">/**
+
+- 配置多数据源
+- @author : Ar1es
+- @date : 2019/11/28
+- @since : Java 8
+  */</span>
+  <span class="nd">@Configuration</span>
+  <span class="kd">public</span> <span class="kd">class</span> <span class="nc">DatasourceConfig</span> <span class="o">{</span>
+
+<span class="cm">/**
+ * 注入主库数据源
+ */</span>
+<span class="nd">@Bean</span>
+<span class="nd">@ConfigurationProperties</span><span class="o">(</span><span class="s">"spring.datasource.master"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="nc">DataSource</span> <span class="nf">masterDataSource</span><span class="o">()</span> <span class="o">{</span>
+    <span class="k">return</span> <span class="nc">DataSourceBuilder</span><span class="o">.</span><span class="na">create</span><span class="o">().</span><span class="na">build</span><span class="o">();</span>
+<span class="o">}</span>
+
+<span class="cm">/**
+ * 注入从库数据源
+ */</span>
+<span class="nd">@Bean</span>
+<span class="nd">@ConfigurationProperties</span><span class="o">(</span><span class="s">"spring.datasource.slave"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="nc">DataSource</span> <span class="nf">slaveDataSource</span><span class="o">()</span> <span class="o">{</span>
+    <span class="k">return</span> <span class="nc">DataSourceBuilder</span><span class="o">.</span><span class="na">create</span><span class="o">().</span><span class="na">build</span><span class="o">();</span>
+<span class="o">}</span>
+
+<span class="cm">/**
+ * 配置选择数据源
+ * @param masterDataSource
+ * @param slaveDataSource
+ * @return DataSource
+ */</span>
+<span class="nd">@Bean</span>
+<span class="kd">public</span> <span class="nc">DataSource</span> <span class="nf">myRoutingDataSource</span><span class="o">(</span><span class="nd">@Qualifier</span><span class="o">(</span><span class="s">"masterDataSource"</span><span class="o">)</span> <span class="nc">DataSource</span> <span class="n">masterDataSource</span><span class="o">,</span>
+                                      <span class="nd">@Qualifier</span><span class="o">(</span><span class="s">"slaveDataSource"</span><span class="o">)</span> <span class="nc">DataSource</span> <span class="n">slaveDataSource</span><span class="o">)</span> <span class="o">{</span>
+    <span class="nc">Map</span><span class="o">&lt;</span><span class="nc">Object</span><span class="o">,</span> <span class="nc">Object</span><span class="o">&gt;</span> <span class="n">targetDataSource</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">HashMap</span><span class="o">&lt;&gt;();</span>
+    <span class="n">targetDataSource</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="nc">DBTypeEnum</span><span class="o">.</span><span class="na">MASTER</span><span class="o">,</span> <span class="n">masterDataSource</span><span class="o">);</span>
+    <span class="n">targetDataSource</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="nc">DBTypeEnum</span><span class="o">.</span><span class="na">SLAVE</span><span class="o">,</span> <span class="n">slaveDataSource</span><span class="o">);</span>
+
+    <span class="nc">MyRoutingDataSource</span> <span class="n">myRoutingDataSource</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">MyRoutingDataSource</span><span class="o">();</span>
+    <span class="c1">//找不到用默认数据源</span>
+    <span class="n">myRoutingDataSource</span><span class="o">.</span><span class="na">setDefaultTargetDataSource</span><span class="o">(</span><span class="n">masterDataSource</span><span class="o">);</span>
+    <span class="c1">//可选择目标数据源</span>
+    <span class="n">myRoutingDataSource</span><span class="o">.</span><span class="na">setTargetDataSources</span><span class="o">(</span><span class="n">targetDataSource</span><span class="o">);</span>
+    <span class="k">return</span> <span class="n">myRoutingDataSource</span><span class="o">;</span>
+
+<span class="o">}</span>
+<span class="o">}</span>
+</code></pre></div></div>
+<p>切面实现数据源切换</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="n">com</span><span class="o">.</span><span class="na">softlab</span><span class="o">.</span><span class="na">provider</span><span class="o">.</span><span class="na">config</span><span class="o">;</span>
+
+<span class="kn">import</span> <span class="nn">org.aspectj.lang.annotation.Aspect</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.aspectj.lang.annotation.Before</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.aspectj.lang.annotation.Pointcut</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">org.springframework.stereotype.Component</span><span class="o">;</span>
+
+<span class="cm">/**
+
+- 多数据源， 切面处理类
+- @author : Ar1es
+- @date : 2019/11/28
+- @since : Java 8
+  */</span>
+
+<span class="nd">@Aspect</span>
+<span class="nd">@Component</span>
+<span class="c1">//需要service中方法名称按一定规则编写，然后通过切面来设置数据库类别</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">DataSourceAop</span> <span class="o">{</span>
+
+<span class="c1">//@annotation在方法上进行设置</span>
+<span class="nd">@Pointcut</span><span class="o">(</span><span class="s">"!@annotation(com.softlab.common.util.Master)"</span> <span class="o">+</span>
+          <span class="s">"&amp;&amp; (execution(* com.softlab.common.service..*.select*(..))"</span> <span class="o">+</span>
+          <span class="s">"|| execution(* com.softlab.common.service..*.get*(..)))"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kt">void</span> <span class="nf">readPointcut</span><span class="o">()</span> <span class="o">{</span>
+
+<span class="o">}</span>
+
+   
+<span class="nd">@Pointcut</span><span class="o">(</span><span class="s">"@annotation(com.softlab.common.util.Master)"</span> <span class="o">+</span>
+          <span class="s">"|| execution(* com.softlab.common.service..*.insert*(..))"</span> <span class="o">+</span>
+          <span class="s">"|| execution(* com.softlab.common.service..*.add*(..))"</span> <span class="o">+</span>
+          <span class="s">"|| execution(* com.softlab.common.service..*.update*(..))"</span> <span class="o">+</span>
+          <span class="s">"|| execution(* com.softlab.common.service..*.delete*(..)))"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kt">void</span> <span class="nf">writePointcut</span><span class="o">()</span> <span class="o">{</span>
+
+<span class="o">}</span>
+
+
+<span class="nd">@Before</span><span class="o">(</span><span class="s">"readPointcut()"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kt">void</span> <span class="nf">read</span><span class="o">()</span> <span class="o">{</span>
+    <span class="nc">DBContextHolder</span><span class="o">.</span><span class="na">slave</span><span class="o">();</span>
+<span class="o">}</span>
+
+<span class="nd">@Before</span><span class="o">(</span><span class="s">"writePointcut()"</span><span class="o">)</span>
+<span class="kd">public</span> <span class="kt">void</span> <span class="nf">write</span><span class="o">()</span> <span class="o">{</span>
+    <span class="nc">DBContextHolder</span><span class="o">.</span><span class="na">master</span><span class="o">();</span>
+<span class="o">}</span>
+
+
+<span class="o">}</span>
+</code></pre></div></div>
+<p>如果有强制走主库的操作，可以定义注解</p>
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">package</span> <span class="n">com</span><span class="o">.</span><span class="na">softlab</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">util</span><span class="o">;</span>
+
+<span class="cm">/**
+
+- @author : Ar1es
+- @date : 2019/11/28
+- @since : Java 8
+  */</span>
+  <span class="kd">public</span> <span class="nd">@interface</span> <span class="nc">Master</span> <span class="o">{</span>
+  <span class="o">}</span>
+</code></pre></div></div>
+<p>自行定义读写操作，结果如下图所示
+  <img src="https://img-blog.csdnimg.cn/20191129143257410.png#pic_center" alt="在这里插入图片描述" /></p>
+:ET
