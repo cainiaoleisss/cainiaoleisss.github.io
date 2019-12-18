@@ -1,0 +1,189 @@
+I"�<h1 id="docker-简单应用">Docker 简单应用</h1>
+
+<p>Docker 是一个基于 Go 语言 并遵从 Apache2.0 协议开源的应用容器引擎，让开发者可以打包他们的应用以及依赖包到一个可移植的镜像中，然后发布到任何流行的Linux或Windows 机器上，也可以实现虚拟化。容器是完全使用沙箱机制，相互之间不会有任何接口。</p>
+
+<h2 id="docker的应用场景">Docker的应用场景</h2>
+
+<ul>
+  <li>Web 应用的自动化打包和发布。</li>
+  <li>自动化测试和持续集成、发布。</li>
+  <li>在服务型环境中部署和调整数据库或其他的后台应用。</li>
+  <li>从头编译或者扩展现有的 OpenShift 或 Cloud Foundry 平台来搭建自己的 PaaS 环境。</li>
+</ul>
+
+<h2 id="下面介绍在ubuntu上docker的安装">下面介绍在Ubuntu上Docker的安装</h2>
+
+<ol>
+  <li>
+    <h3 id="卸载旧版本">卸载旧版本</h3>
+  </li>
+</ol>
+
+<p>Docker 的旧版本被称为 docker，docker.io 或 docker-engine 。如果已安装，请卸载它们</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>apt-get remove docker docker-engine docker.io containerd runc
+</code></pre></div></div>
+
+<ol>
+  <li>
+    <h3 id="使用-docker-仓库进行安装">使用 Docker 仓库进行安装</h3>
+  </li>
+</ol>
+
+<p>更新 apt 包</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>apt-get update
+</code></pre></div></div>
+
+<p>通过HTTPS使用仓库(repository)安装：</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>apt <span class="nb">install </span>apt-transport-https ca-certificates curl software-properties-common
+</code></pre></div></div>
+
+<p>在/etc/apt/sources.list.d/docker.list文件中添加下面内容</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>deb <span class="o">[</span><span class="nb">arch</span><span class="o">=</span>amd64] https://download.docker.com/linux/ubuntu bionic stable
+</code></pre></div></div>
+
+<p>添加Docker官方的GPG密钥：</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl <span class="nt">-fsSL</span> https://download.docker.com/linux/ubuntu/gpg | <span class="nb">sudo </span>apt-key add -
+</code></pre></div></div>
+
+<p>安装：</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>apt <span class="nb">install </span>docker-ce
+</code></pre></div></div>
+
+<ol>
+  <li>
+    <h3 id="验证docker">验证Docker</h3>
+  </li>
+</ol>
+
+<p>查看docker服务是否启动</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>systemctl status docker
+</code></pre></div></div>
+
+<p><img src="http://39.97.112.80:8080/pic/image-20191218145406129.png" alt="image-20191218145406129" /></p>
+
+<p>若未启动则启动</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>systemctl start docker
+</code></pre></div></div>
+
+<p>配置镜像源，直接从dockerhub下载镜像太慢, 需要配置国内镜像源, 修改daemon.json文件</p>
+
+<p>PS：（文件夹中没有，需自行创建）</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">sudo </span>vim /etc/docker/daemon.json
+</code></pre></div></div>
+
+<p>添加镜像源，这里使用的是中科大的镜像源</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{
+  "registry-mirrors": ["https://docker.mirrors.ustc.edu.cn/"]
+}  
+</code></pre></div></div>
+
+<h2 id="下面介绍docker配置tomcat">下面介绍Docker配置tomcat</h2>
+
+<ol>
+  <li>
+    <h3 id="搜索tomcat镜像">搜索tomcat镜像</h3>
+  </li>
+</ol>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker search tomcat
+</code></pre></div></div>
+
+<p><img src="http://39.97.112.80:8080/pic/image-20191218150238137.png" alt="image-20191218150238137" /></p>
+
+<ol>
+  <li>
+    <h3 id="这里我们选择第一个拉取tomcat镜像">这里我们选择第一个，拉取tomcat镜像</h3>
+  </li>
+</ol>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker pull tomcat
+</code></pre></div></div>
+
+<p><img src="http://39.97.112.80:8080/pic/image-20191218150859056.png" alt="image-20191218150859056" /></p>
+
+<ol>
+  <li>
+    <h3 id="创建tomcat容器">创建tomcat容器</h3>
+  </li>
+</ol>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker run <span class="nt">-d</span> <span class="nt">--name</span> tomcat <span class="nt">-v</span> /etc/localtime:/etc/localtime <span class="nt">-p</span> 8090:8080 tomcat:latest
+<span class="c"># –name 容器名称</span>
+<span class="c"># -p 8090:8080 8090 是宿主机端口 8080是tomcat容器端口 8080映射到8090</span>
+<span class="c">#  tomcat:latest 镜像名称及版本</span>
+<span class="c"># -v /etc/localtime:/etc/localtime 容器使用宿主机时间、时区</span>
+</code></pre></div></div>
+
+<ol>
+  <li>
+    <h3 id="查看tomcat运行情况">查看tomcat运行情况</h3>
+  </li>
+</ol>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker ps
+</code></pre></div></div>
+
+<p><img src="http://39.97.112.80:8080/pic/image-20191218151419265.png" alt="image-20191218151419265" /></p>
+
+<ol>
+  <li>
+    <h3 id="外部访问">外部访问</h3>
+  </li>
+</ol>
+
+<p><img src="http://39.97.112.80:8080/pic/image-20191218151530102.png" alt="image-20191218151530102" /></p>
+
+<p>看到访问成功</p>
+
+<h3 id="6配置war包">6.配置war包</h3>
+
+<p>首先进入容器（中间填写自己的container id）</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker <span class="nb">exec</span> <span class="nt">-it</span> 67094cc6cb3d /bin/bash
+</code></pre></div></div>
+
+<p><img src="http://39.97.112.80:8080/pic/image-20191218151731935.png" alt="image-20191218151731935" /></p>
+
+<p>退出</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">exit</span>
+</code></pre></div></div>
+
+<p>上传war包到自己服务器（不演示）</p>
+
+<p>将war包上传到docker镜像里</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker <span class="nb">cp </span>BookStore.war tomcat:/usr/local/tomcat/webapps
+<span class="c"># docker cp :用于容器与主机之间的数据拷贝。</span>
+<span class="c"># docker cp [OPTIONS] CONTAINER:SRC_PATH DEST_PATH|-</span>
+<span class="c"># docker cp [OPTIONS] SRC_PATH|- CONTAINER:DEST_PATH</span>
+<span class="c"># OPTIONS说明  -L :保持源目标中的链接</span>
+</code></pre></div></div>
+
+<ol>
+  <li>
+    <h3 id="重启镜像">重启镜像</h3>
+  </li>
+</ol>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code>docker restart 67094cc6cb3d
+</code></pre></div></div>
+
+<ol>
+  <li>
+    <h3 id="外部访问-1">外部访问</h3>
+  </li>
+</ol>
+
+<p><img src="http://39.97.112.80:8080/pic/image-20191218152411842.png" alt="image-20191218152411842" /></p>
+:ET
