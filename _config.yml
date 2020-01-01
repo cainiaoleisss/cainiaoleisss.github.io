@@ -1,7 +1,7 @@
 # Site settings 配置站点
-title: 'Ar1es'
-description: ''
-keyword: 'Ar1es, Ar1es的独立博客, Ar1es的博客, 后端，后端开发, java, MySQL, Redis, Docker'
+title: 'lansss'
+description: '计算机爱好者'
+keyword: 'lansss, lansss的独立博客, lansss的博客, 后端，后端开发, java, MySQL, Redis, Docker'
 url: '' # your host
 
 # when build blog on server, if you don't need baseurl, you should leave this value blank.
@@ -57,7 +57,7 @@ postPatterns: 'seaOfClouds'
 # url: email, weibo, zhihu, twitter, instagram, juejin, github, douban, facebook, dribble, uicn, jianshu, medium, linkedin
 sns:
   email : 'mailto:925900181@qq.com'
-  github: '//github.com/Ar1ess'
+  github: '//github.com/lansss'
   zhihu : 'https://www.zhihu.com/people/meng-qing-chun-89/activities'
 
 # Tags 设置标签
