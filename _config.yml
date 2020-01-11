@@ -56,9 +56,9 @@ postPatterns: 'seaOfClouds'
 # SNS settings 配置社交网站
 # url: email, weibo, zhihu, twitter, instagram, juejin, github, douban, facebook, dribble, uicn, jianshu, medium, linkedin
 sns:
-  email : 'mailto:925900181@qq.com'
+  email : 'mailto:2426398674@qq.com'
   github: '//github.com/lansss'
-  zhihu : 'https://www.zhihu.com/people/meng-qing-chun-89/activities'
+  zhihu : 'https://www.zhihu.com/people/lansss-5/activities'
 
 # Tags 设置标签
 recommend-tags: true # whether or not display recommend-tags on the sidebar
