@@ -57,7 +57,7 @@ postPatterns: 'seaOfClouds'
 # url: email, weibo, zhihu, twitter, instagram, juejin, github, douban, facebook, dribble, uicn, jianshu, medium, linkedin
 sns:
   email : 'mailto:2426398674@qq.com'
-  github: '//github.com/lansss'
+  github: '//github.com/nefulansss'
   zhihu : 'https://www.zhihu.com/people/lansss-5/activities'
 
 # Tags 设置标签
