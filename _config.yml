@@ -1,7 +1,7 @@
 # Site settings 配置站点
-title: 'lansss'
-description: '计算机爱好者'
-keyword: 'lansss, lansss的独立博客, lansss的博客, 后端，后端开发, java, MySQL, Redis, Docker'
+title: 'cainiaoleisss'
+description: '摄影工作者'
+keyword: 'cainiaoleisss, cainiaoleisss的独立博客'
 url: '' # your host
 
 # when build blog on server, if you don't need baseurl, you should leave this value blank.
@@ -24,10 +24,10 @@ footer:
   since: 2019
 
 # Author 配置博主信息
-author: 'lansss'
-nickname: '哇哈lan'
-bio: '喜欢白日做梦'
-avatar: '/assets/img/nazi.jpg'
+author: 'cainiaoleisss'
+nickname: '哇哈cainiaoleisss'
+bio: '啥也不想干'
+avatar: '/assets/img/ashuai.jpg'
 
 # Search
 search: true
@@ -48,7 +48,7 @@ social-share: true
 social-share-items: ['wechat', 'weibo', 'qzone', 'qq']
 
 # theme color 主题皮肤
-theme-color: 'pink'  # pink or default
+theme-color: 'default'  # pink or default
 
 # Post header background patterns (when the post no cover): circuitBoard, overlappingCircles, food, glamorous, ticTacToe, seaOfClouds
 postPatterns: 'seaOfClouds'
@@ -56,9 +56,9 @@ postPatterns: 'seaOfClouds'
 # SNS settings 配置社交网站
 # url: email, weibo, zhihu, twitter, instagram, juejin, github, douban, facebook, dribble, uicn, jianshu, medium, linkedin
 sns:
-  email : 'mailto:2426398674@qq.com'
-  github: '//github.com/nefulansss'
-  zhihu : 'https://www.zhihu.com/people/lansss-5/activities'
+  email : 'mailto:2082970200@qq.com'
+  github: '//github.com/cainiaoleisss'
+  zhihu : 'https://www.zhihu.com/people/ming-jiang-10-38'
 
 # Tags 设置标签
 recommend-tags: true # whether or not display recommend-tags on the sidebar
